@@ -1,0 +1,29 @@
+# kind cluster configuration for the kagent tutorial.
+#
+# Kubernetes 1.37+ is required by Agent Substrate, and the
+# certificates.k8s.io/v1beta1 API (which Agent Substrate depends on) must be
+# enabled through runtimeConfig.
+#
+# The "__CLUSTER_NAME__" placeholder is substituted by scripts/up.sh from the
+# CLUSTER_NAME variable (default: "kagent"). If you run `kind create cluster`
+# manually, replace it with your cluster name.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: __CLUSTER_NAME__
+runtimeConfig:
+  "certificates.k8s.io/v1beta1": "true"
+
+networking:
+  # Do NOT inherit the host's DNS search domains into the node and pods.
+  #
+  # Docker copies the host /etc/resolv.conf (including its `search` list) into
+  # the node container, and the kubelet then appends those domains to every
+  # pod's search list. If the host search domain has a wildcard DNS record
+  # (e.g. `*.keksel.pro`), then a lookup like `registry.ollama.ai` is expanded
+  # to `registry.ollama.ai.keksel.pro` and resolves to the wildcard IP instead
+  # of the real one, breaking TLS with errors like:
+  #
+  #   x509: certificate is valid for pereswet.keksel.pro, not registry.ollama.ai
+  #
+  # Setting dnsSearch to an empty list clears the node search domains.
+  dnsSearch: []

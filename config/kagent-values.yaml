@@ -1,0 +1,52 @@
+# Helm values for the kagent chart (v1.0.0-alpha3) in a local kind cluster.
+#
+# This file wires three things together:
+#   1. providers      -> kagent generates a `default-model-config` ModelConfig
+#                        that points at the in-cluster Ollama Service.
+#   2. controller.substrate
+#                      -> enables the Agent Substrate integration so that
+#                        Harnesses can actually run agents.
+#   3. substrateWorkerPool
+#                      -> provisions a single gvisor Worker that agent turns
+#                        execute on.
+#
+# The Ollama model name is injected by scripts/up.sh via
+#   --set providers.ollama.model="${OLLAMA_MODEL}"
+# so it can be overridden per environment without editing this file.
+
+providers:
+  default: ollama
+  ollama:
+    provider: Ollama
+    # Default model; overridden by scripts/up.sh from $OLLAMA_MODEL.
+    model: "qwen3:8b"
+    config:
+      # Ollama runs as a Service in the `ollama` namespace inside the cluster.
+      # A scheme is required (the runtime url.Parse()s this value).
+      host: http://ollama.ollama.svc.cluster.local:11434
+      options:
+        num_ctx: "32768"
+
+controller:
+  grpc:
+    # Lets general-purpose clients (grpcurl, ...) discover controller methods.
+    reflection: true
+  substrate:
+    enabled: true
+    ateApiEndpoint: dns:///api.ate-system.svc:443
+    atenetRouterURL: http://atenet-router.ate-system.svc:80
+    defaultWorkerPool:
+      name: kagent-default
+
+substrateWorkerPool:
+  create: true
+  replicas: 1
+  # gvisor sandbox runtime — kagent ActorTemplates are compiled to the gvisor
+  # class, so this must stay gvisor.
+  sandboxClass: gvisor
+  workerImage: "ghcr.io/kagent-dev/substrate/ateom-gvisor:v0.2.0-beta5"
+
+# The built-in kagent MCP tool server (kubectl/helm/argo/... tools) stays on.
+# The Grafana MCP server is off: there is no Grafana instance in this tutorial.
+grafana-mcp:
+  enabled: false

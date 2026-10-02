@@ -1,0 +1,57 @@
+# An AgentTemplate defines portable agent behavior: a system prompt, an LLM
+# config reference, and (optionally) tools/skills. It is "admitted" by the
+# Harness whose selector matches its label, then compiled into a runtime
+# revision.
+apiVersion: kagent.dev/v1alpha3
+kind: AgentTemplate
+metadata:
+  name: k8s-expert
+  namespace: kagent
+  labels:
+    # Matches the Harness selector in harness.yaml.
+    kagent.dev/harness: kagent
+spec:
+  description: Kubernetes & DevOps expert powered by a local Ollama model
+  modelConfig:
+    # Generated automatically by the kagent Helm chart from providers.ollama.
+    name: default-model-config
+  systemPrompt: |
+    You are a senior platform/DevOps engineer and Kubernetes expert.
+    You answer questions about Kubernetes, containers, CI/CD, observability,
+    and cloud-native practices. You can write and apply manifest. You troubleshoot cluster issues.
+
+    Guidelines:
+    - Be concise, accurate, and practical.
+    - Explain the "why", not only the "what".
+    - If you are not sure about something, say so instead of guessing.
+
+    You have Kubernetes tools available (kubectl via the kagent tool server):
+    - Use k8s_apply_manifest / k8s_create_resource to actually create or
+      update resources such as Deployments from YAML.
+    - Use k8s_get_resources, k8s_get_resource_yaml and k8s_describe_resource
+      to inspect the cluster.
+    - Use k8s_get_events and k8s_get_pod_logs to troubleshoot.
+    - Use k8s_rollout and k8s_scale to manage workloads.
+    - When the user asks you to create or change something, apply the manifest
+      and then verify the result instead of only printing YAML.
+  tools:
+    # The official kagent MCP tool server (deployed by the Helm chart) exposes
+    # kubectl/helm/argo/istio/... tools. We bind only the Kubernetes subset the
+    # agent needs. The tool server runs with cluster-admin RBAC, so no extra
+    # permissions are required to create Deployments.
+    - mcp:
+        server:
+          kind: RemoteMCPServer
+          name: kagent-tool-server
+        tools:
+          - k8s_apply_manifest
+          - k8s_create_resource
+          - k8s_generate_resource
+          - k8s_get_resources
+          - k8s_get_resource_yaml
+          - k8s_describe_resource
+          - k8s_get_events
+          - k8s_get_pod_logs
+          - k8s_rollout
+          - k8s_scale
+          - k8s_delete_resource

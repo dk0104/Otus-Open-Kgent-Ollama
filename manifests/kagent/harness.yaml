@@ -1,0 +1,27 @@
+# A Harness declares a reusable agent runtime + infrastructure policy, and
+# "admits" AgentTemplates whose labels match its selector.
+#
+# This Harness uses kagent's native runtime (the `kagent: {}` adapter) and runs
+# every turn on the Agent Substrate WorkerPool that scripts/up.sh provisions
+# (kagent-default). Snapshots land in the in-cluster rustfs object store that
+# the Agent Substrate chart deploys (bucket: ate-snapshots).
+apiVersion: kagent.dev/v1alpha3
+kind: Harness
+metadata:
+  name: kagent
+  namespace: kagent
+spec:
+  kagent: {}
+  workload:
+    # kagent's native runtime image, pinned by digest.
+    image: ghcr.io/kagent-dev/kagent/golang-adk@sha256:699c7a36daa0050d5954f42ad3b614690d825664cf64ffe8871dbe20dc68464e
+  substrate:
+    workerPoolRef:
+      name: kagent-default
+    snapshotPolicy:
+      # In-cluster rustfs bucket deployed by the Agent Substrate chart.
+      location: s3://ate-snapshots/kagent/
+  allowedAgentTemplates:
+    selector:
+      matchLabels:
+        kagent.dev/harness: kagent

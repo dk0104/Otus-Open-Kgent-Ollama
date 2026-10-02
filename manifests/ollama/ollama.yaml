@@ -1,0 +1,91 @@
+# Ollama running as a workload inside the kind cluster.
+#
+# Why in-cluster? kagent agents execute inside sandboxed Actors (gvisor
+# Workers) with controlled egress. They can reach in-cluster Service DNS, but
+# an Ollama server on your laptop is NOT reachable from inside an Actor, even
+# when `kubectl port-forward` makes it reachable from your terminal.
+#
+# Models are cached in a PersistentVolumeClaim so a pod restart does not
+# re-download them.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ollama
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-models
+  namespace: ollama
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi # enough for qwen3:8b plus a couple more models
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: ollama
+  labels:
+    app: ollama
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 11434
+              protocol: TCP
+          env:
+            - name: OLLAMA_HOST
+              value: "0.0.0.0"
+            # Drop idle models from RAM after 5m to keep the node lean.
+            - name: OLLAMA_KEEP_ALIVE
+              value: "5m"
+          readinessProbe:
+            tcpSocket:
+              port: 11434
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              # qwen3:8b (Q4) needs ~6GB. Tune this for your hardware / model.
+              memory: 12Gi
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: ollama-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: ollama
+spec:
+  type: ClusterIP
+  selector:
+    app: ollama
+  ports:
+    - name: http
+      port: 11434
+      targetPort: http
+      protocol: TCP
