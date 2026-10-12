@@ -1,0 +1,13 @@
+# Deploys the vendored Google Online Boutique into a single namespace.
+#
+#   kubectl apply -k manifests/boutique/          # or: kubectl apply -f manifests/boutique/
+#
+# The namespace is injected here so no manifest in online-boutique.yaml needs to
+# set it. All service-to-service references use short (namespace-local) names, so
+# keeping every workload in 'online-boutique' is all that is required.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: online-boutique
+resources:
+  - namespace.yaml
+  - online-boutique.yaml

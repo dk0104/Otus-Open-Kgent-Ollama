@@ -1,0 +1,8 @@
+# The vendored online-boutique.yaml does not declare a namespace, and
+# kustomization.yaml injects `namespace: online-boutique` onto every object.
+# This resource creates the namespace so `kubectl apply -k manifests/boutique/`
+# is fully self-contained.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: online-boutique

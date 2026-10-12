@@ -1,0 +1,26 @@
+# RemoteMCPServer for the prometheus-mcp server (T-008, FR-006/FR-007).
+#
+# Declares the prometheus-mcp HTTP endpoint (deployed into `monitoring` by the
+# pab1it0/prometheus-mcp-server chart, service `prometheus-mcp:8080`, MCP path
+# `/mcp`, protocol Streamable HTTP) as a remote MCP server that kagent can
+# bind to AgentTemplates.
+#
+# Note: although this file lives under manifests/monitoring/, the
+# RemoteMCPServer is a kagent resource and therefore lives in the `kagent`
+# namespace (same namespace as the AgentTemplate it is bound from).
+apiVersion: kagent.dev/v1alpha3
+kind: RemoteMCPServer
+metadata:
+  name: prometheus-mcp
+  namespace: kagent
+  labels:
+    app.kubernetes.io/part-of: kagent
+spec:
+  description: >-
+    Prometheus MCP server: execute instant/range PromQL, list metrics and
+    their metadata, inspect scrape targets and the Prometheus health.
+  protocol: STREAMABLE_HTTP
+  url: http://prometheus-mcp.monitoring.svc:8080/mcp
+  timeout: 30s
+  sseReadTimeout: 5m0s
+  terminateOnClose: true

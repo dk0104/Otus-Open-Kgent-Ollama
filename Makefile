@@ -13,7 +13,7 @@ Q             ?= What is the difference between a Deployment and a StatefulSet?
 export CLUSTER_NAME
 export OLLAMA_MODEL
 
-.PHONY: help prereqs up down chat ui logs status clean
+.PHONY: help prereqs up verify-monitoring down chat ui logs status clean
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -21,8 +21,11 @@ help: ## Show this help
 prereqs: ## Check / install the toolchain (kubectl-ate, kagent CLI)
 	./scripts/prerequisites.sh
 
-up: ## Bring up the full stack (kind + substrate + kagent + ollama + agent)
+up: ## Bring up the full stack (kind + substrate + kagent + ollama + monitoring + Boutique)
 	./scripts/up.sh
+
+verify-monitoring: ## Health-check the monitoring plane after `make up` (exit 0 = OK)
+	./scripts/verify-monitoring.sh
 
 chat: ## Chat with the k8s-expert agent (Q="your question")
 	./scripts/chat.sh "$(Q)"

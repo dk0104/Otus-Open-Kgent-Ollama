@@ -10,10 +10,16 @@ document is the manual, explained version.
 - [3. Install Agent Substrate](#3-install-agent-substrate)
 - [4. Install kagent](#4-install-kagent)
 - [5. Run Ollama in the cluster](#5-run-ollama-in-the-cluster)
-- [6. Declare the agent](#6-declare-the-agent)
-- [7. Chat with the agent](#7-chat-with-the-agent)
-- [8. Clean up](#8-clean-up)
-- [9. Going further](#9-going-further)
+- [6. Declare the Harness](#6-declare-the-harness)
+- [7. Bring up the monitoring plane](#7-bring-up-the-monitoring-plane)
+- [8. Deploy Google Online Boutique](#8-deploy-google-online-boutique)
+- [9. Grafana ServiceAccount + API token](#9-grafana-serviceaccount--api-token)
+- [10. Wire up the MCP servers](#10-wire-up-the-mcp-servers)
+- [11. Declare the k8s-expert agent](#11-declare-the-k8s-expert-agent)
+- [12. The monitoring dialogue](#12-the-monitoring-dialogue)
+- [13. Chat with the agent](#13-chat-with-the-agent)
+- [14. Clean up](#14-clean-up)
+- [15. Going further](#15-going-further)
 
 ## 0. The pieces and why they fit
 
@@ -225,13 +231,15 @@ tools. Recommended options:
 Change the model in both places: `make up OLLAMA_MODEL=...` and the
 `--set providers.ollama.model=...` value.
 
-## 6. Declare the agent
+## 6. Declare the Harness
 
-kagent models agents as two CRDs:
+kagent models agents as two CRDs: a **`Harness`** (runtime + policy) and an
+**`AgentTemplate`** (prompt + model + tools). The Harness is declared here; the
+`k8s-expert` `AgentTemplate` is declared **last** (section 11), once its MCP
+tool servers exist, so its tool bindings resolve on first admission.
 
 ```bash
 kubectl apply -f manifests/kagent/harness.yaml
-kubectl apply -f manifests/kagent/agent-template.yaml
 ```
 
 **`Harness`** — a reusable runtime + policy. It *admits* `AgentTemplate`s whose
@@ -250,29 +258,213 @@ spec:
     selector: { matchLabels: { kagent.dev/harness: kagent } }
 ```
 
-**`AgentTemplate`** — portable agent behavior (prompt + model reference):
+## 7. Bring up the monitoring plane
+
+The monitoring plane lives in the `monitoring` namespace and is installed by
+three Helm releases:
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update prometheus-community
+
+# Prometheus + Grafana + operator + node/kube-state exporters
+helm upgrade --install kps prometheus-community/kube-prometheus-stack \
+  --version 92.2.0 --namespace monitoring --create-namespace \
+  -f config/kps-values.yaml
+
+# blackbox-exporter (the prober the Boutique Probe resources call)
+helm upgrade --install blackbox-exporter prometheus-community/blackbox-exporter \
+  --version 11.20.0 --namespace monitoring \
+  -f config/blackbox-values.yaml
+
+# prometheus-mcp-server (PromQL + metric discovery exposed as MCP tools)
+helm upgrade --install prometheus-mcp \
+  oci://ghcr.io/pab1it0/prometheus-mcp-server/charts/prometheus-mcp-server \
+  --version 1.1.1 --namespace monitoring \
+  -f config/prom-mcp-values.yaml
+```
+
+Key points:
+
+- **`kps-values.yaml`** sets a known Grafana admin (`admin`/`admin`) so the
+  token bootstrap (section 9) works, and lets Prometheus auto-discover
+  ServiceMonitors/Probes from **all** namespaces
+  (`serviceMonitorNamespaceSelector: {}`, `probeNamespaceSelector: {}`), so the
+  blackbox exporter and the Boutique probes are scraped regardless of who
+  created them.
+- **`blackbox-values.yaml`** defines two probe modules: `http_2xx` (the
+  storefront) and `tcp_connect` (the gRPC backends + redis). A gRPC port does
+  not answer an HTTP GET with 2xx, so `tcp_connect` is the correct module for
+  the backends.
+- **`prom-mcp-values.yaml`** points the MCP server at the in-cluster
+  Prometheus (`http://kps-kube-prometheus-stack-prometheus.monitoring.svc:9090`)
+  and serves Streamable HTTP on `prometheus-mcp:8080/mcp`.
+
+`scripts/up.sh` waits for the operator, then Prometheus, Grafana,
+blackbox-exporter, and prometheus-mcp to be ready.
+
+## 8. Deploy Google Online Boutique
+
+The target app is Google's [Online Boutique](https://github.com/GoogleCloudPlatform/microservices-demo)
+— 12 microservices (frontend, carts, checkout, payments, ...) plus a
+`loadgenerator` that generates traffic so the dashboards have data. The
+upstream `release/kubernetes-manifests.yaml` (pinned to public images) is
+vendored into the repo, and a `kustomization.yaml` injects the
+`online-boutique` namespace:
+
+```bash
+kubectl apply -k manifests/boutique/
+kubectl -n online-boutique rollout status deployment/frontend
+```
+
+Then the blackbox availability probes (two `Probe` resources) are applied so
+Prometheus drives the blackbox-exporter against every endpoint:
+
+```bash
+kubectl apply -f manifests/monitoring/probes.yaml
+```
+
+- `boutique-frontend-http` (module `http_2xx`) → `frontend:80`.
+- `boutique-backends-tcp` (module `tcp_connect`) → the 9 gRPC backends + redis.
+
+Resulting metric: `probe_success{job="boutique-frontend-http", service="..."}`
+(and `probe_duration_seconds`, ...). No Boutique source code is modified.
+
+## 9. Grafana ServiceAccount + API token
+
+The Grafana MCP server authenticates to Grafana with a ServiceAccount API
+token. The kps chart ships a fixed admin user but no ServiceAccount, so
+`scripts/grafana-token.sh` creates one (idempotently):
+
+1. Port-forwards the Grafana service.
+2. Ensures a ServiceAccount `kagent-mcp` (role `Editor`) exists (reused by name).
+3. Resets it to exactly one token and stores it in the `grafana-mcp-token`
+   Secret (namespace `kagent`) under the key `GRAFANA_SERVICE_ACCOUNT_TOKEN`.
+4. Verifies the token against `GET /api/org`.
+
+```bash
+./scripts/grafana-token.sh
+kubectl -n kagent get secret grafana-mcp-token
+```
+
+## 10. Wire up the MCP servers
+
+Two MCP servers back the agent's monitoring tools:
+
+- **Grafana MCP** — kagent's built-in `grafana-mcp` sub-chart. It is *deferred*
+  during the initial kagent install (section 4, `--set grafana-mcp.enabled=false`)
+  because its token Secret does not exist yet. Now that the token exists,
+  re-upgrade kagent to enable it and restart the Pod so it picks up the current
+  token:
+
+  ```bash
+  helm upgrade --install kagent oci://ghcr.io/kagent-dev/kagent/helm/kagent \
+    --version 1.0.0-alpha3 --namespace kagent --timeout 10m \
+    --set providers.ollama.model="qwen3:8b" -f config/kagent-values.yaml
+  kubectl -n kagent rollout restart deployment/kagent-grafana-mcp
+  kubectl -n kagent rollout status deployment/kagent-grafana-mcp
+  ```
+
+  This creates the `RemoteMCPServer` **`kagent-grafana-mcp`**
+  (`http://kagent-grafana-mcp.kagent:8000/mcp`) and a Deployment that talks to
+  Grafana using `GRAFANA_URL` (`kps-grafana.monitoring.svc:80/api`) + the token.
+
+- **Prometheus MCP** — a `RemoteMCPServer` that points at the
+  prometheus-mcp server (section 7):
+
+  ```bash
+  kubectl apply -f manifests/monitoring/prometheus-mcp.yaml
+  ```
+
+  This creates the `RemoteMCPServer` **`prometheus-mcp`**
+  (`http://prometheus-mcp.monitoring.svc:8080/mcp`).
+
+Both must reach the `Accepted` condition (tools discovered) before the agent
+can bind them:
+
+```bash
+kubectl -n kagent get remotemcpservers
+# NAME                PROTOCOL         URL                                            ACCEPTED
+# kagent-grafana-mcp  STREAMABLE_HTTP  http://kagent-grafana-mcp.kagent:8000/mcp     True
+# prometheus-mcp      STREAMABLE_HTTP  http://prometheus-mcp.monitoring.svc:8080/mcp True
+```
+
+## 11. Declare the k8s-expert agent
+
+Now that both MCP servers exist, the `AgentTemplate` is applied. It binds three
+MCP tool servers and carries the monitoring system prompt:
+
+```bash
+kubectl apply -f manifests/kagent/agent-template.yaml
+```
 
 ```yaml
 spec:
   description: Kubernetes & DevOps expert powered by a local Ollama model
   modelConfig: { name: default-model-config }
-  systemPrompt: |
-    You are a senior platform/DevOps engineer and Kubernetes expert. ...
+  systemPrompt: |   # Kubernetes expert + monitoring workflow + dashboard JSON guide
+    ...
+  tools:
+    - mcp: { server: { kind: RemoteMCPServer, name: kagent-tool-server } }  # kubectl/helm
+    - mcp:                                                          # Prometheus
+        server: { kind: RemoteMCPServer, name: prometheus-mcp }
+        tools: [ execute_query, list_metrics, get_metric_metadata, get_targets ]
+    - mcp:                                                          # Grafana
+        server: { kind: RemoteMCPServer, name: kagent-grafana-mcp }
+        tools: [ update_dashboard, patch_dashboard, search_dashboards,
+                 get_dashboard_summary, create_folder, list_datasources ]
 ```
 
-Confirm the pair compiled:
+The `tools` list limits each server to the tools the agent needs (least
+privilege). `up.sh` verifies the servers are `Accepted` before applying this,
+and the AgentTemplate only becomes `Ready` once its bindings resolve:
 
 ```bash
-kubectl -n kagent get agenttemplate k8s-expert -o jsonpath='{.status.harnesses[0].conditions[?(@.type=="Ready")].status}'
+kubectl -n kagent get agenttemplate k8s-expert -o \
+  jsonpath='{.status.harnesses[0].conditions[?(@.type=="Ready")].status}'
 # -> True
 ```
 
 An empty `HARNESS` column with `READY=UNKNOWN` means the controller hasn't
-reconciled the pair yet. `FALSE` means a stage failed — inspect
+reconciled the pair yet; `FALSE` means a stage failed — inspect
 `status.harnesses[].conditions` (`Accepted`, `ResolvedRefs`, `Compatible`,
 `Ready`) and the controller logs.
 
-## 7. Chat with the agent
+A reference dashboard (`templates/grafana/boutique-dashboard.example.json`)
+ships in the repo as a structural guide (allowed panel types, namespace-scoped
+PromQL) and as an importable example.
+
+## 12. The monitoring dialogue
+
+The heart of the demo. Open the web UI and drive the agent through a real
+monitoring conversation:
+
+```bash
+./scripts/ui.sh    # -> http://localhost:8082
+```
+
+1. Start a conversation with `k8s-expert` and ask:
+   > "What monitoring options can you build for the Online Boutique?"
+2. The agent first discovers what is *really* scraped — `get_targets` and
+   `list_metrics` — so it only proposes metrics that exist.
+3. It proposes concrete scenarios grounded in real metrics, e.g.:
+   - **Availability** — `probe_success{job="boutique-frontend-http"}`
+   - **Request latency** — `probe_duration_seconds{job="boutique-frontend-http"}`
+   - **Pod CPU** — `sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="online-boutique"}[5m]))`
+   - **Pod memory / restarts / readiness / replicas** — and so on.
+4. Pick one or more. The agent resolves the Prometheus data source
+   (`list_datasources`), ensures the `kagent-monitoring` folder
+   (`create_folder`), and creates the dashboard (`update_dashboard`).
+5. It returns a Grafana URL. Open Grafana
+   (`kubectl -n monitoring port-forward svc/kps-grafana 3000:80` →
+   http://localhost:3000, admin/admin) to see the panels with live data.
+6. Ask for a change (e.g. "add a memory panel" or "widen the time range").
+   The agent uses `get_dashboard_summary` + `patch_dashboard` to update the
+   **same** dashboard in place — no duplicate.
+
+Health-check the plane any time with `make verify-monitoring`.
+
+## 13. Chat with the agent
 
 ```bash
 ./scripts/chat.sh "Why does my Pod stay in Pending?"
@@ -297,7 +489,7 @@ For the web UI:
 ./scripts/ui.sh    # -> http://localhost:8082
 ```
 
-## 8. Clean up
+## 14. Clean up
 
 ```bash
 ./scripts/down.sh      # asks for confirmation, then deletes the cluster
@@ -307,7 +499,7 @@ For the web UI:
 Deleting the kind cluster removes Agent Substrate, kagent, the Ollama pod, the
 model cache (PVC), and all agent state in one shot.
 
-## 9. Going further
+## 15. Going further
 
 - **Give the agent real cluster tools.** The kagent chart ships a built-in MCP
   tool server (Kubernetes, Helm, Argo, Prometheus, Grafana, Cilium tools). Bind
@@ -341,3 +533,8 @@ model cache (PVC), and all agent state in one shot.
 | Agent Substrate | `0.2.0-beta5` |
 | kagent runtime image | `ghcr.io/kagent-dev/kagent/golang-adk@sha256:699c7a36daa0050d5954f42ad3b614690d825664cf64ffe8871dbe20dc68464e` |
 | Ollama model | `qwen3:8b` (configurable) |
+| kube-prometheus-stack | `92.2.0` |
+| blackbox-exporter | `11.20.0` |
+| prometheus-mcp-server | `1.1.1` |
+| grafana-mcp | `0.1.12` (kagent sub-chart) |
+| Google Online Boutique | `release/kubernetes-manifests.yaml` (vendored) |

@@ -1,0 +1,96 @@
+# kube-prometheus-stack values for the local demo (kagent + Ollama + Boutique).
+#
+# Goals:
+#   * Keep total memory modest so it fits a 16 GB kind node alongside Ollama
+#     (qwen3:8b, up to 12 Gi limit) and the Online Boutique app.
+#   * Let Prometheus auto-discover ServiceMonitors / Probes / PodMonitors from
+#     ALL namespaces, so the blackbox exporter (its own ServiceMonitor) and the
+#     Boutique `Probe` resources are scraped regardless of which Helm release
+#     created them.
+#   * Provide a known Grafana admin user/password so the setup script can
+#     bootstrap a ServiceAccount + API token for the Grafana MCP server.
+
+# --- Grafana ------------------------------------------------------------------
+grafana:
+  adminUser: admin
+  adminPassword: admin            # local demo only - not for production
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# --- Prometheus ---------------------------------------------------------------
+prometheus:
+  prometheusSpec:
+    retention: 24h                # a day is plenty for a demo
+    retentionSize: 4GiB
+    # Select monitoring objects from ALL namespaces (empty selector = match all).
+    # This is what lets our blackbox `Probe`s and the exporter's ServiceMonitor
+    # be picked up even though they are created outside this release.
+    #
+    # NOTE: the kps chart template renders an empty/nil object selector as
+    # `matchLabels: {release: kps}` UNLESS the corresponding
+    # `*SelectorNilUsesHelmValues` flag (default `true`) is set to `false`.
+    # So each selector below pairs with its flag set to `false`, which makes
+    # the template emit `selector: {}` = match everything. Without the flags,
+    # our Probes and the blackbox exporter's ServiceMonitor (no `release` label)
+    # are silently dropped from the Prometheus scrape config.
+    serviceMonitorSelector: null
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorNamespaceSelector: {}
+    probeSelector: null
+    probeSelectorNilUsesHelmValues: false
+    probeNamespaceSelector: {}
+    podMonitorSelector: null
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorNamespaceSelector: {}
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+
+# --- Collectors ---------------------------------------------------------------
+kubeStateMetrics:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+prometheusNodeExporter:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# --- Operator / Alertmanager (kept light; not core to the demo) ---------------
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi

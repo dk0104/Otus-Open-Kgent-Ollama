@@ -1,0 +1,37 @@
+# prometheus-blackbox-exporter values for the local demo.
+#
+# The exporter is deployed here so the Boutique `Probe` resources (see
+# manifests/monitoring/probes.yaml) have a prober to call. We do NOT use the
+# chart's ServiceMonitor-targets probing mode - Boutique availability is driven
+# by dedicated `Probe` CRDs, which is cleaner and maps 1:1 to endpoints.
+fullnameOverride: blackbox-exporter   # -> svc blackbox-exporter.monitoring.svc:9115
+
+# Modules the exporter supports. We keep the chart's default http_2xx and add
+# tcp_connect: the Boutique backends speak gRPC, which does NOT answer a plain
+# HTTP GET with 2xx, so they are probed at the TCP level instead.
+config:
+  modules:
+    http_2xx:
+      prober: http
+      timeout: 5s
+      http:
+        valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+        follow_redirects: true
+        preferred_ip_protocol: "ip4"
+    tcp_connect:
+      prober: tcp
+      timeout: 5s
+
+serviceMonitor:
+  # Scrape the exporter's own /metrics so it has an `up` series and build info.
+  selfMonitor:
+    enabled: true
+    interval: 30s
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi

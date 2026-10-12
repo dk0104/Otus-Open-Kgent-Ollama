@@ -1,0 +1,28 @@
+# prometheus-mcp-server values for the local demo.
+#
+# Exposes Prometheus to the k8s-expert agent over the Model Context Protocol
+# (Streamable HTTP). The kagent `RemoteMCPServer` for this will point at
+#   http://prometheus-mcp.monitoring.svc:8080/mcp   (protocol STREAMABLE_HTTP).
+fullnameOverride: prometheus-mcp      # -> svc prometheus-mcp.monitoring.svc:8080
+
+prometheus:
+  # In-cluster Prometheus from kube-prometheus-stack (release "kps").
+  # The chart names the Prometheus Service <release>-kube-prometheus-stack-prometheus.
+  url: http://kps-kube-prometheus-stack-prometheus.monitoring.svc:9090
+
+mcp:
+  transport: http        # Streamable HTTP -> endpoint /mcp
+  bindHost: 0.0.0.0      # reachable in-cluster (required for non-stdio)
+  statelessHttp: true    # no server-side session state; safe behind any LB
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi

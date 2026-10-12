@@ -13,12 +13,19 @@ export SUBSTRATE_VERSION="${SUBSTRATE_VERSION:-0.2.0-beta5}"
 # kagent's native runtime image (golang-adk), pinned by digest for the version above.
 export KAGENT_RUNTIME_IMAGE="${KAGENT_RUNTIME_IMAGE:-ghcr.io/kagent-dev/kagent/golang-adk@sha256:699c7a36daa0050d5954f42ad3b614690d825664cf64ffe8871dbe20dc68464e}"
 
+# Monitoring stack (Prometheus/Grafana) + MCP server pins.
+export KPS_VERSION="${KPS_VERSION:-92.2.0}"             # kube-prometheus-stack
+export BLACKBOX_VERSION="${BLACKBOX_VERSION:-11.20.0}"  # prometheus-blackbox-exporter
+export PROM_MCP_VERSION="${PROM_MCP_VERSION:-1.1.1}"    # pab1it0/prometheus-mcp-server chart
+
 # --- Cluster / namespace defaults ---------------------------------------------
 export CLUSTER_NAME="${CLUSTER_NAME:-kagent}"
 export KIND_NODE_IMAGE="${KIND_NODE_IMAGE:-kindest/node:v1.37.0}"
 export KAGENT_NAMESPACE="${KAGENT_NAMESPACE:-kagent}"
 export ATE_NAMESPACE="${ATE_NAMESPACE:-ate-system}"
 export OLLAMA_NAMESPACE="${OLLAMA_NAMESPACE:-ollama}"
+export MONITORING_NAMESPACE="${MONITORING_NAMESPACE:-monitoring}"
+export BOUTIQUE_NAMESPACE="${BOUTIQUE_NAMESPACE:-online-boutique}"
 
 # --- Ollama settings ----------------------------------------------------------
 # A model with solid function/tool-calling support is required, because kagent
@@ -32,6 +39,15 @@ export SUBSTRATE_CRDS_CHART="oci://ghcr.io/kagent-dev/substrate/helm/substrate-c
 export SUBSTRATE_CHART="oci://ghcr.io/kagent-dev/substrate/helm/substrate"
 export KAGENT_CRDS_CHART="oci://ghcr.io/kagent-dev/kagent/helm/kagent-crds"
 export KAGENT_CHART="oci://ghcr.io/kagent-dev/kagent/helm/kagent"
+
+# --- Monitoring chart locations -----------------------------------------------
+# kube-prometheus-stack + blackbox come from the prometheus-community Helm repo
+# (ensured present by up.sh); the Prometheus MCP chart is pulled from OCI.
+export PROMETHEUS_COMMUNITY_REPO_NAME="prometheus-community"
+export PROMETHEUS_COMMUNITY_REPO_URL="https://prometheus-community.github.io/helm-charts"
+export KPS_CHART="prometheus-community/kube-prometheus-stack"
+export BLACKBOX_CHART="prometheus-community/prometheus-blackbox-exporter"
+export PROM_MCP_CHART="oci://ghcr.io/pab1it0/charts/prometheus-mcp-server"
 
 # --- Paths --------------------------------------------------------------------
 export SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

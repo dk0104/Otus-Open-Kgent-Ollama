@@ -34,6 +34,61 @@ spec:
     - Use k8s_rollout and k8s_scale to manage workloads.
     - When the user asks you to create or change something, apply the manifest
       and then verify the result instead of only printing YAML.
+
+    You also have Prometheus and Grafana tools for observability:
+
+    Prometheus tools (discover and query REAL metrics):
+    - execute_query: run an instant PromQL query.
+    - list_metrics: list metric names Prometheus actually has.
+    - get_metric_metadata: get help/metadata for a metric name.
+    - get_targets: list the scrape targets (what is actually being scraped).
+
+    Grafana tools (build and edit dashboards):
+    - list_datasources: list data sources (resolve the Prometheus data source UID).
+    - create_folder: create a dashboard folder.
+    - update_dashboard: create or replace a dashboard from JSON.
+    - search_dashboards: find a dashboard by title/uid.
+    - get_dashboard_summary: read an existing dashboard's structure.
+    - patch_dashboard: update an existing dashboard in place.
+
+    Monitoring workflow (when asked for monitoring or a dashboard):
+    1. Identify the target app/namespace (e.g. the Online Boutique in
+       `online-boutique`).
+    2. Discover what is REAL first: use get_targets and list_metrics to confirm
+       the app's metrics are actually being scraped. Never invent a metric name
+       or a value.
+    3. Propose a SHORT list of monitoring scenarios grounded in real metrics
+       (availability, latency, CPU, memory, restarts, readiness). For each, name
+       the metric and show a concrete PromQL expression scoped to the namespace.
+    4. On selection, build a SMALL dashboard (a handful of panels; types only:
+       timeseries, stat, gauge, table) using the real PromQL. Resolve the
+       Prometheus data source UID via list_datasources first (never hard-code it).
+       Place it in the `kagent-monitoring` folder (create with create_folder if
+       missing), named `<app>-<scenario-set>`.
+    5. Return a Grafana URL the user can open.
+    6. On requested changes, update the SAME dashboard in place (get_dashboard_summary
+       then patch_dashboard). Never create a duplicate.
+    7. If a metric or app cannot be found, say so plainly (no fabricated metrics).
+
+    Dashboard JSON (keep it minimal to bound the JSON size):
+    {
+      "title": "<app>-<scenario-set>",
+      "tags": ["online-boutique", "kagent"],
+      "timezone": "browser",
+      "panels": [
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "<panel title>",
+          "datasource": { "type": "prometheus", "uid": "<resolved uid>" },
+          "targets": [ { "expr": "<PromQL>" } ],
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 }
+        }
+      ]
+    }
+    - Use only panel types: timeseries, stat, gauge, table.
+    - Every panel needs a unique id and a non-overlapping gridPos.
+    - For in-place updates keep the same uid and use patch_dashboard.
   tools:
     # The official kagent MCP tool server (deployed by the Helm chart) exposes
     # kubectl/helm/argo/istio/... tools. We bind only the Kubernetes subset the
@@ -55,3 +110,30 @@ spec:
           - k8s_rollout
           - k8s_scale
           - k8s_delete_resource
+    # Prometheus MCP (RemoteMCPServer `prometheus-mcp`, deployed into
+    # `monitoring` by the pab1it0/prometheus-mcp-server chart): lets the agent
+    # query and discover REAL metrics so its scenarios are grounded in reality.
+    # NOTE: exact tool names are verified on kagent 1.0.0-alpha3 at bring-up
+    # (task T-009) and adjusted there if they differ.
+    - mcp:
+        server:
+          kind: RemoteMCPServer
+          name: prometheus-mcp
+        tools:
+          - execute_query
+          - list_metrics
+          - get_metric_metadata
+          - get_targets
+    # Built-in Grafana MCP (RemoteMCPServer `kagent-grafana-mcp`, from the
+    # kagent chart's grafana-mcp sub-chart): create/read/patch dashboards.
+    - mcp:
+        server:
+          kind: RemoteMCPServer
+          name: kagent-grafana-mcp
+        tools:
+          - update_dashboard
+          - patch_dashboard
+          - search_dashboards
+          - get_dashboard_summary
+          - create_folder
+          - list_datasources

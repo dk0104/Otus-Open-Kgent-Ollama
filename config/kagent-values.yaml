@@ -47,6 +47,24 @@ substrateWorkerPool:
   workerImage: "ghcr.io/kagent-dev/substrate/ateom-gvisor:v0.2.0-beta5"
 
 # The built-in kagent MCP tool server (kubectl/helm/argo/... tools) stays on.
-# The Grafana MCP server is off: there is no Grafana instance in this tutorial.
+#
+# The built-in Grafana MCP server is ENABLED and pointed at the in-cluster
+# Grafana (kube-prometheus-stack, release "kps", service kps-grafana.monitoring,
+# service port 80). It authenticates with the ServiceAccount API token that
+# scripts/grafana-token.sh creates in the Secret `grafana-mcp-token` (kagent
+# namespace) under the key GRAFANA_SERVICE_ACCOUNT_TOKEN, via grafana.secretRef.
+#
+# NOTE on ordering: the token Secret only exists once Grafana is up, which is
+# AFTER the initial kagent install. scripts/up.sh therefore installs kagent
+# with `--set grafana-mcp.enabled=false` and re-upgrades it (without that
+# override) once the token Secret exists, so the grafana-mcp Pod starts with a
+# valid token from the beginning.
 grafana-mcp:
-  enabled: false
+  enabled: true
+  grafana:
+    # In-cluster Grafana API. The grafana-mcp server expects a host:port/api
+    # form (no scheme). kps exposes the Grafana service on port 80.
+    url: "kps-grafana.monitoring.svc:80/api"
+    # Secret (in the kagent namespace) holding GRAFANA_SERVICE_ACCOUNT_TOKEN.
+    # Created by scripts/grafana-token.sh.
+    secretRef: grafana-mcp-token

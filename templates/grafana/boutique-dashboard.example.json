@@ -1,0 +1,72 @@
+{
+  "title": "online-boutique-baseline",
+  "uid": "boutique-baseline",
+  "tags": ["online-boutique", "kagent", "reference"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Frontend HTTP availability",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [ { "expr": "probe_success{job=\"boutique-frontend-http\"}" } ],
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Backend TCP availability (worst)",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [ { "expr": "min(probe_success{job=\"boutique-backends-tcp\"})" } ],
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 0 }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Replicas available",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [ { "expr": "sum(kube_deployment_status_replicas_available{namespace=\"online-boutique\"})" } ],
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 0 }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Frontend probe latency (s)",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [ { "expr": "probe_duration_seconds{job=\"boutique-frontend-http\"}" } ],
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Pod CPU (cores)",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "targets": [ { "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"online-boutique\"}[5m]))" } ],
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 12 }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Pod memory (bytes)",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [ { "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"online-boutique\"})" } ],
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Container restarts",
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "targets": [ { "expr": "kube_pod_container_status_restarts_total{namespace=\"online-boutique\"}" } ],
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 }
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+# blackbox Probes for Google Online Boutique.
+#
+# Applied into the 'monitoring' namespace. The prometheus-operator (installed by
+# kube-prometheus-stack, probeSelector: {} / probeNamespaceSelector: {}) picks these
+# up automatically and drives the blackbox-exporter against each target.
+#
+# API shape note: on the prometheus-operator `v1` Probe, `spec.targets.staticConfig`
+# is a SINGLE OBJECT (not a list) with fields `static` (list of host:port),
+# `labels`, and `relabelingConfigs`. This differs from the older `v1alpha1` shape
+# (a list of `{targets, labels}` entries) — `targets` was renamed to `static`.
+# Likewise `spec.prober.url` is `host:port` WITHOUT a scheme (v1alpha1 took a
+# full URL); the scheme goes in the separate `spec.prober.scheme` field. A
+# scheme-prefixed url is rejected by the operator ("should be of the format
+# `hostname` or `hostname:port`"), and the Probe is silently skipped.
+#
+# Two probes, chosen per protocol:
+#   1. boutique-frontend-http (module http_2xx)    - the storefront HTTP endpoint (port 80).
+#   2. boutique-backends-tcp  (module tcp_connect) - the gRPC backends + redis. A gRPC port
+#      does not answer an HTTP GET with 2xx, so tcp_connect is the correct module.
+#
+# Resulting metric: probe_success{job="boutique-frontend-http"|..., service="...", instance="..."}
+# (plus probe_duration_seconds, probe_in_progress, probe_offline_duration_seconds).
+# The `service` label is set explicitly for the single-target frontend probe and
+# derived from the target hostname for the multi-target backends probe (below).
+
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: boutique-frontend-http
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: online-boutique
+spec:
+  interval: 30s
+  module: http_2xx
+  jobName: boutique-frontend-http
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+    scheme: http
+  targets:
+    staticConfig:
+      static:
+        - frontend.online-boutique.svc:80
+      labels:
+        app: online-boutique
+        service: frontend
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: boutique-backends-tcp
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: online-boutique
+spec:
+  interval: 30s
+  module: tcp_connect
+  jobName: boutique-backends-tcp
+  prober:
+    url: blackbox-exporter.monitoring.svc:9115
+    scheme: http
+  targets:
+    staticConfig:
+      static:
+        - adservice.online-boutique.svc:9555
+        - cartservice.online-boutique.svc:7070
+        - checkoutservice.online-boutique.svc:5050
+        - currencyservice.online-boutique.svc:7000
+        - emailservice.online-boutique.svc:5000
+        - paymentservice.online-boutique.svc:50051
+        - productcatalogservice.online-boutique.svc:3550
+        - recommendationservice.online-boutique.svc:8080
+        - shippingservice.online-boutique.svc:50051
+        - redis-cart.online-boutique.svc:6379
+      labels:
+        app: online-boutique
+      # Derive a per-service `service` label from the target hostname, since a
+      # single staticConfig can only carry one shared label set.
+      # __address__ is "<svc>.online-boutique.svc:<port>", so the first hostname
+      # label (before the first dot) is the service name.
+      relabelingConfigs:
+        - sourceLabels: [__address__]
+          regex: '^([^.]+)\..*'
+          targetLabel: service
+          replacement: '$1'

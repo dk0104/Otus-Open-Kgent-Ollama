@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Print the state of the whole stack: cluster, substrate, kagent, ollama, agent.
+# Print the state of the whole stack: cluster, substrate, kagent, ollama,
+# monitoring plane, Remote MCP servers, Online Boutique, and agent instances.
 
 set -euo pipefail
 
@@ -27,6 +28,19 @@ kubectl get pods -n "$OLLAMA_NAMESPACE" 2>/dev/null || echo "not installed"
 echo
 kubectl -n "$OLLAMA_NAMESPACE" get pods 2>/dev/null | grep -q ollama \
   && kubectl -n "$OLLAMA_NAMESPACE" exec deploy/ollama -- ollama list 2>/dev/null || true
+
+section "Monitoring plane (${MONITORING_NAMESPACE})"
+kubectl get pods -n "$MONITORING_NAMESPACE" 2>/dev/null || echo "not installed"
+echo
+kubectl -n "$MONITORING_NAMESPACE" get probes 2>/dev/null || true
+
+section "Remote MCP servers (${KAGENT_NAMESPACE})"
+kubectl -n "$KAGENT_NAMESPACE" get remotemcpservers 2>/dev/null || true
+echo
+kubectl -n "$KAGENT_NAMESPACE" get secret grafana-mcp-token 2>/dev/null || true
+
+section "Google Online Boutique (${BOUTIQUE_NAMESPACE})"
+kubectl get pods -n "$BOUTIQUE_NAMESPACE" 2>/dev/null || echo "not installed"
 
 section "AgentInstances"
 if command -v kagent >/dev/null 2>&1; then
